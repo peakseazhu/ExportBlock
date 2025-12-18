@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+.vscode/
+.venv/
+.env
+
+# outputs / artifacts
+outputs/
+*.parquet
+*.hdf5
+*.h5
+*.npz
+*.jsonl
+
+# large raw datasets (not suitable for GitHub without LFS)
+*.mseed
+*.sac
+*.sec
+*.min
+*.hor
+*.cdf

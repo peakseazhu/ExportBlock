@@ -1,0 +1,307 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<FDSNStationXML xmlns="http://www.fdsn.org/xml/station/1" schemaVersion="1.2">
+  <Source>IRIS-DMC</Source>
+  <Sender>IRIS-DMC</Sender>
+  <Module>IRIS WEB SERVICE: fdsnws-station | version: 1.1.52</Module>
+  <ModuleURI>http://service.iris.edu/fdsnws/station/1/query?starttime=2020-09-08T02%3A44%3A11.000000&amp;endtime=2020-09-14T02%3A44%3A11.000000&amp;network=JP%2CJP%2CJP%2CJP%2CJP%2CII&amp;station=JMM%2CJTM%2CJKA%2CJYT%2CJSD%2CERM&amp;channel=BHZ&amp;level=channel</ModuleURI>
+  <Created>2025-12-14T15:07:28.419500Z</Created>
+  <Network code="II" startDate="1986-01-01T00:00:00.000000Z" restrictedStatus="open">
+    <Description>Global Seismograph Network - II (GSN/II)</Description>
+    <Identifier type="DOI">10.7914/SN/II
+   </Identifier>
+    <TotalNumberStations>59</TotalNumberStations>
+    <SelectedNumberStations>1</SelectedNumberStations>
+    <Station code="ERM" startDate="1990-05-21T00:00:00.000000Z" restrictedStatus="open">
+      <Latitude unit="DEGREES">42.015</Latitude>
+      <Longitude unit="DEGREES">143.1572</Longitude>
+      <Elevation>40.0</Elevation>
+      <Site>
+        <Name>Erimo, Hokkaido Island, Japan</Name>
+      </Site>
+      <CreationDate>1990-05-21T00:00:00.000000Z</CreationDate>
+      <TotalNumberChannels>211</TotalNumberChannels>
+      <SelectedNumberChannels>2</SelectedNumberChannels>
+      <Channel code="BHZ" startDate="2016-08-24T00:00:00.000000Z" endDate="2020-10-02T05:59:59.000000Z" restrictedStatus="open" locationCode="00">
+        <Latitude unit="DEGREES">42.015</Latitude>
+        <Longitude unit="DEGREES">143.1572</Longitude>
+        <Elevation>40.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <Type>CONTINUOUS</Type>
+        <Type>GEOPHYSICAL</Type>
+        <SampleRate unit="SAMPLES/S">20.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">2.5e-06</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>Volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Metrozet M2166-VBV Seismometer</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>3990240000.0</Value>
+            <Frequency>0.05</Frequency>
+            <InputUnits>
+              <Name>m/s</Name>
+              <Description>Velocity in Meters Per Second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>counts</Name>
+              <Description>Digital Counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+      <Channel code="BHZ" startDate="2016-08-24T00:00:00.000000Z" endDate="2020-10-01T23:29:59.000000Z" restrictedStatus="open" locationCode="10">
+        <Latitude unit="DEGREES">42.015</Latitude>
+        <Longitude unit="DEGREES">143.1572</Longitude>
+        <Elevation>40.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <Type>CONTINUOUS</Type>
+        <Type>GEOPHYSICAL</Type>
+        <SampleRate unit="SAMPLES/S">40.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">1.25e-06</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>Volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Streckeisen STS-2.5 Seismometer</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>2469520000.0</Value>
+            <Frequency>0.05</Frequency>
+            <InputUnits>
+              <Name>m/s</Name>
+              <Description>Velocity in Meters Per Second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>counts</Name>
+              <Description>Digital Counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+    </Station>
+  </Network>
+  <Network code="JP" startDate="1994-01-01T00:00:00.000000Z" restrictedStatus="open">
+    <Description>Japan Meteorological Agency Seismic Network ()</Description>
+    <TotalNumberStations>24</TotalNumberStations>
+    <SelectedNumberStations>5</SelectedNumberStations>
+    <Station code="JKA" startDate="1994-09-30T00:00:00.000000Z" restrictedStatus="open">
+      <Latitude unit="DEGREES">41.118801</Latitude>
+      <Longitude unit="DEGREES">142.593002</Longitude>
+      <Elevation>220.0</Elevation>
+      <Site>
+        <Name>Kamikawa Asahi</Name>
+      </Site>
+      <CreationDate>1994-09-30T00:00:00.000000Z</CreationDate>
+      <TotalNumberChannels>3</TotalNumberChannels>
+      <SelectedNumberChannels>1</SelectedNumberChannels>
+      <Channel code="BHZ" startDate="1996-09-24T00:00:00.000000Z" restrictedStatus="open" locationCode="">
+        <Latitude unit="DEGREES">44.118801</Latitude>
+        <Longitude unit="DEGREES">142.593002</Longitude>
+        <Elevation>220.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <SampleRate unit="SAMPLES/S">20.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">0.0001</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>emf in volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Streckeisen STS-2</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>1000000000.0</Value>
+            <Frequency>8.0</Frequency>
+            <InputUnits>
+              <Name>M/S</Name>
+              <Description>velocity in meters per second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>COUNTS</Name>
+              <Description>digital counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+    </Station>
+    <Station code="JMM" startDate="1996-09-24T00:00:00.000000Z" restrictedStatus="open">
+      <Latitude unit="DEGREES">37.868999</Latitude>
+      <Longitude unit="DEGREES">140.789673</Longitude>
+      <Elevation>100.0</Elevation>
+      <Site>
+        <Name>Miyagi Marumori</Name>
+      </Site>
+      <CreationDate>1996-09-24T00:00:00.000000Z</CreationDate>
+      <TotalNumberChannels>3</TotalNumberChannels>
+      <SelectedNumberChannels>1</SelectedNumberChannels>
+      <Channel code="BHZ" startDate="1996-09-24T00:00:00.000000Z" restrictedStatus="open" locationCode="">
+        <Latitude unit="DEGREES">37.868999</Latitude>
+        <Longitude unit="DEGREES">140.789673</Longitude>
+        <Elevation>100.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <SampleRate unit="SAMPLES/S">20.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">0.0001</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>emf in volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Streckeisen STS-2</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>1000000000.0</Value>
+            <Frequency>8.0</Frequency>
+            <InputUnits>
+              <Name>M/S</Name>
+              <Description>velocity in meters per second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>COUNTS</Name>
+              <Description>digital counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+    </Station>
+    <Station code="JSD" startDate="1996-09-29T00:00:00.000000Z" restrictedStatus="open">
+      <Latitude unit="DEGREES">38.040001</Latitude>
+      <Longitude unit="DEGREES">138.257172</Longitude>
+      <Elevation>146.0</Elevation>
+      <Site>
+        <Name>Sado</Name>
+      </Site>
+      <CreationDate>1996-09-29T00:00:00.000000Z</CreationDate>
+      <TotalNumberChannels>3</TotalNumberChannels>
+      <SelectedNumberChannels>1</SelectedNumberChannels>
+      <Channel code="BHZ" startDate="1996-09-29T00:00:00.000000Z" restrictedStatus="open" locationCode="">
+        <Latitude unit="DEGREES">38.040001</Latitude>
+        <Longitude unit="DEGREES">138.257172</Longitude>
+        <Elevation>146.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <SampleRate unit="SAMPLES/S">20.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">0.0001</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>emf in volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Streckeisen STS-2</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>1000000000.0</Value>
+            <Frequency>8.0</Frequency>
+            <InputUnits>
+              <Name>M/S</Name>
+              <Description>velocity in meters per second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>COUNTS</Name>
+              <Description>digital counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+    </Station>
+    <Station code="JTM" startDate="1996-10-06T00:00:00.000000Z" restrictedStatus="open">
+      <Latitude unit="DEGREES">40.789501</Latitude>
+      <Longitude unit="DEGREES">141.064667</Longitude>
+      <Elevation>130.0</Elevation>
+      <Site>
+        <Name>Aomori Tenma</Name>
+      </Site>
+      <CreationDate>1996-10-06T00:00:00.000000Z</CreationDate>
+      <TotalNumberChannels>3</TotalNumberChannels>
+      <SelectedNumberChannels>1</SelectedNumberChannels>
+      <Channel code="BHZ" startDate="1996-10-06T00:00:00.000000Z" restrictedStatus="open" locationCode="">
+        <Latitude unit="DEGREES">40.789501</Latitude>
+        <Longitude unit="DEGREES">141.064667</Longitude>
+        <Elevation>130.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <SampleRate unit="SAMPLES/S">20.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">0.0001</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>emf in volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Streckeisen STS-2</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>1000000000.0</Value>
+            <Frequency>8.0</Frequency>
+            <InputUnits>
+              <Name>M/S</Name>
+              <Description>velocity in meters per second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>COUNTS</Name>
+              <Description>digital counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+    </Station>
+    <Station code="JYT" startDate="1996-09-05T00:00:00.000000Z" restrictedStatus="open">
+      <Latitude unit="DEGREES">36.230831</Latitude>
+      <Longitude unit="DEGREES">140.190674</Longitude>
+      <Elevation>31.0</Elevation>
+      <Site>
+        <Name>Ibaraki Yasato</Name>
+      </Site>
+      <CreationDate>1996-09-05T00:00:00.000000Z</CreationDate>
+      <TotalNumberChannels>3</TotalNumberChannels>
+      <SelectedNumberChannels>1</SelectedNumberChannels>
+      <Channel code="BHZ" startDate="1996-09-05T00:00:00.000000Z" restrictedStatus="open" locationCode="">
+        <Latitude unit="DEGREES">36.230831</Latitude>
+        <Longitude unit="DEGREES">140.190674</Longitude>
+        <Elevation>31.0</Elevation>
+        <Depth>0.0</Depth>
+        <Azimuth unit="DEGREES">0.0</Azimuth>
+        <Dip unit="DEGREES">-90.0</Dip>
+        <SampleRate unit="SAMPLES/S">20.0</SampleRate>
+        <ClockDrift unit="SECONDS/SAMPLE">0.0001</ClockDrift>
+        <CalibrationUnits>
+          <Name>V</Name>
+          <Description>emf in volts</Description>
+        </CalibrationUnits>
+        <Sensor>
+          <Description>Streckeisen STS-2</Description>
+        </Sensor>
+        <Response>
+          <InstrumentSensitivity>
+            <Value>1000000000.0</Value>
+            <Frequency>8.0</Frequency>
+            <InputUnits>
+              <Name>M/S</Name>
+              <Description>velocity in meters per second</Description>
+            </InputUnits>
+            <OutputUnits>
+              <Name>COUNTS</Name>
+              <Description>digital counts</Description>
+            </OutputUnits>
+          </InstrumentSensitivity>
+        </Response>
+      </Channel>
+    </Station>
+  </Network>
+</FDSNStationXML>

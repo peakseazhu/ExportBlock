@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exportblock"
+version = "0.1.0"
+description = "Multi-source geophysics data pipeline: ingest, preprocess, align, link events, features/anomaly, API and plots."
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2.0",
+  "pandas>=2.0",
+  "pyarrow>=10.0",
+  "scipy>=1.10",
+  "PyYAML>=6.0",
+  "obspy>=1.4",
+  "cdflib>=1.3",
+  "fastapi>=0.110",
+  "uvicorn>=0.30",
+  "httpx>=0.27",
+  "plotly>=5.20",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+

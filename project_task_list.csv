@@ -1,0 +1,11 @@
+Issue ID,Category,Title,Description,Requirements,VerifySteps,Evidence
+1,Ingestion,IAGA2002 Parser,Parse IAGA2002 data files and handle missing data,Parse sec/min files and generate metadata,Ensure metadata matches expected format,outputs/reports/dq_ingest_iaga.json
+2,Ingestion,MiniSEED Ingest,Parse MiniSEED data and extract waveforms,Extract waveform data and station info,Verify that data is correctly parsed and stored,outputs/reports/dq_ingest_mseed.json
+3,Preprocessing,Kalman Filtering,Apply Kalman filter to geomagnetic data,Apply Kalman filter for noise reduction,Verify filtering process with before and after comparison,outputs/reports/filter_effect.json
+4,Feature Extraction,Feature Calculation,Calculate energy features for seismic data,"Extract RMS, peak frequency, etc.",Verify feature extraction process,outputs/reports/dq_features.json
+5,Alignment,Time Alignment,Align all data sources to a common time grid,Generate a 1-min time grid for all sources,Verify data alignment and completeness,outputs/reports/dq_align.json
+6,Spatial Query,Spatial Indexing,Build R-tree index for stations,Create R-tree for station locations,Test distance-based queries on R-tree,outputs/reports/dq_spatial.json
+7,Event Matching,Event Linkage,Implement event matching based on time and space,Match events within N hours and K km radius,Verify correct linkage with test events,outputs/reports/linked/0001/stations.json
+8,Anomaly Detection,Anomaly Scoring,Develop anomaly detection model using thresholds,Detect anomalies based on z-scores,Validate anomalies detected for sample events,outputs/reports/dq_anomaly.json
+9,API,FastAPI Endpoints,Develop FastAPI endpoints for data querying,"Create endpoints for raw, linked, and feature data",Perform API tests to ensure correct responses,outputs/api_tests/logs.json
+10,Visualization,Plotly Visualization,Create visualization for time series and heatmaps,Generate time series and heatmap plots for events,Ensure plots display correctly with event data,outputs/plots/figures/0001/plot_timeseries.json
