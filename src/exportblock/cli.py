@@ -7,14 +7,25 @@ from pathlib import Path
 import uvicorn
 
 from exportblock.config import load_config
-from exportblock.pipeline.run import run_pipeline
+from exportblock.pipeline.run import build_pipeline, link_pipeline
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="exportblock")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run = sub.add_parser("run", help="运行端到端流水线（生成 outputs/ 产物）")
+    for name, help_text in [
+        ("build", "全量 ingest + 预处理（Raw → Standard）"),
+        ("link", "按配置事件执行关联、特征、可视化"),
+    ]:
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument(
+            "--config",
+            default="configs/demo.yaml",
+            help="配置文件路径（YAML），默认: configs/demo.yaml",
+        )
+
+    run = sub.add_parser("run", help="兼容入口：先 build 再 link")
     run.add_argument(
         "--config",
         default="configs/demo.yaml",
@@ -40,8 +51,17 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config).resolve()
     config = load_config(config_path)
 
+    if args.command == "build":
+        build_pipeline(config, config_path=config_path)
+        return 0
+
+    if args.command == "link":
+        link_pipeline(config, config_path=config_path)
+        return 0
+
     if args.command == "run":
-        run_pipeline(config, config_path=config_path)
+        build_pipeline(config, config_path=config_path)
+        link_pipeline(config, config_path=config_path)
         return 0
 
     if args.command == "api":

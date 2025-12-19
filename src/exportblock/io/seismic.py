@@ -50,19 +50,23 @@ def _minute_aligned_start(t0: UTCDateTime) -> UTCDateTime:
     return t0 + delta
 
 
-def compute_minute_features(trace: Trace, *, window_start: datetime, window_end: datetime) -> pd.DataFrame:
+def compute_minute_features(trace: Trace, *, window_start: datetime | None = None, window_end: datetime | None = None, align_interval: str = "1min") -> pd.DataFrame:
     sr = float(trace.stats.sampling_rate)
     if sr <= 0:
         raise ValueError("invalid sampling rate")
-    samples_per_min = int(round(sr * 60.0))
-    if samples_per_min <= 0:
+    interval_seconds = pd.to_timedelta(align_interval).total_seconds()
+    samples_per_bucket = int(round(sr * interval_seconds))
+    if samples_per_bucket <= 0:
         raise ValueError("invalid samples_per_min")
 
     t0 = trace.stats.starttime
     t1 = trace.stats.endtime
 
-    start = max(UTCDateTime(window_start), t0)
-    end = min(UTCDateTime(window_end), t1)
+    ws = window_start if window_start is not None else t0.datetime.replace(tzinfo=timezone.utc)
+    we = window_end if window_end is not None else t1.datetime.replace(tzinfo=timezone.utc)
+
+    start = max(UTCDateTime(ws), t0)
+    end = min(UTCDateTime(we), t1)
     if end <= start:
         return pd.DataFrame(columns=["ts_ms", "station_id", "channel", "value"])
 
@@ -77,12 +81,12 @@ def compute_minute_features(trace: Trace, *, window_start: datetime, window_end:
         return pd.DataFrame(columns=["ts_ms", "station_id", "channel", "value"])
 
     usable = data[offset_n:]
-    n_windows = usable.size // samples_per_min
+    n_windows = usable.size // samples_per_bucket
     if n_windows <= 0:
         return pd.DataFrame(columns=["ts_ms", "station_id", "channel", "value"])
 
-    usable = usable[: n_windows * samples_per_min]
-    windows = usable.reshape((n_windows, samples_per_min))
+    usable = usable[: n_windows * samples_per_bucket]
+    windows = usable.reshape((n_windows, samples_per_bucket))
 
     rms = np.sqrt(np.mean(windows**2, axis=1))
     energy = np.sum(windows**2, axis=1)
@@ -90,12 +94,12 @@ def compute_minute_features(trace: Trace, *, window_start: datetime, window_end:
 
     fft = np.fft.rfft(windows, axis=1)
     amp = np.abs(fft)
-    freq = np.fft.rfftfreq(samples_per_min, d=1.0 / sr)
+    freq = np.fft.rfftfreq(samples_per_bucket, d=1.0 / sr)
     peak_idx = np.argmax(amp, axis=1)
     peak_freq = freq[peak_idx]
 
     ts0 = datetime.fromtimestamp(float(t_first.timestamp), tz=timezone.utc)
-    ts_ms = np.array([dt_to_ts_ms(ts0) + i * 60_000 for i in range(n_windows)], dtype=np.int64)
+    ts_ms = np.array([dt_to_ts_ms(ts0) + int(i * interval_seconds * 1000) for i in range(n_windows)], dtype=np.int64)
 
     station_id = trace.id
     out = pd.DataFrame(
@@ -113,8 +117,9 @@ def ingest_mseed_and_features(
     seismic_dir: str | Path,
     *,
     stationxml_path: str | Path,
-    window_start: datetime,
-    window_end: datetime,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
+    align_interval: str = "1min",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     seismic_dir = Path(seismic_dir)
     inv = load_inventory(stationxml_path)
@@ -140,7 +145,7 @@ def ingest_mseed_and_features(
                     elev=elev,
                 )
             )
-            feats = compute_minute_features(tr, window_start=window_start, window_end=window_end)
+            feats = compute_minute_features(tr, window_start=window_start, window_end=window_end, align_interval=align_interval)
             if not feats.empty:
                 feats.insert(1, "source", "seismic")
                 feats = feats.rename(columns={"station_id": "station_id"})
@@ -175,4 +180,3 @@ def ingest_mseed_and_features(
         "station_match_ratio": (sum(1 for m in metas if m.station_match == "exact") / len(metas)) if metas else 0.0,
     }
     return features_df[["ts_ms", "source", "station_id", "channel", "value", "lat", "lon", "elev", "quality_flags"]], meta
-

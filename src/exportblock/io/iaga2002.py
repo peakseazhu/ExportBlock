@@ -91,6 +91,8 @@ def read_iaga2002_file(
     *,
     source: str,
     keep_channels: set[str] | None = None,
+    compact_quality: bool = False,
+    nrows: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     path = Path(path)
     lines = _read_text_lines(path)
@@ -104,6 +106,7 @@ def read_iaga2002_file(
         names=col_names,
         encoding="utf-8",
         engine="python",
+        nrows=nrows,
     )
 
     ts = pd.to_datetime(df["DATE"].astype(str) + " " + df["TIME"].astype(str), utc=True)
@@ -127,9 +130,10 @@ def read_iaga2002_file(
     long_df = long_df.drop(columns=["value_raw"])
 
     abs_val = long_df["value"].abs()
-    is_missing = long_df["value"].isna() | (abs_val >= 88888.0)
-    missing_reason = np.where(np.isclose(abs_val, 88888.0), "dummy", np.where(abs_val >= 88888.0, "sentinel", None))
-    long_df.loc[is_missing, "value"] = np.nan
+    mask_dummy = abs_val.eq(88888.0)
+    mask_sentinel = abs_val.ge(88888.0)
+    mask_missing = long_df["value"].isna() | mask_sentinel
+    long_df.loc[mask_missing, "value"] = np.nan
 
     long_df.insert(1, "source", source)
     long_df.insert(2, "station_id", station_id)
@@ -137,11 +141,17 @@ def read_iaga2002_file(
     long_df["lon"] = float(lon) if lon is not None else np.nan
     long_df["elev"] = float(elev) if elev is not None else np.nan
 
-    q_ok = json.dumps({"is_missing": False}, ensure_ascii=False, separators=(",", ":"))
-    q_sentinel = json.dumps({"is_missing": True, "missing_reason": "sentinel"}, ensure_ascii=False, separators=(",", ":"))
-    q_dummy = json.dumps({"is_missing": True, "missing_reason": "dummy"}, ensure_ascii=False, separators=(",", ":"))
-    quality_flags = np.where(~is_missing, q_ok, np.where(missing_reason == "dummy", q_dummy, q_sentinel))
-    long_df["quality_flags"] = quality_flags
+    if compact_quality:
+        quality = pd.Series(np.full(len(long_df), "ok", dtype=object))
+        quality.loc[mask_dummy] = "dummy"
+        quality.loc[mask_sentinel & ~mask_dummy] = "sentinel"
+        long_df["quality_flags"] = quality
+    else:
+        q_ok = json.dumps({"is_missing": False}, ensure_ascii=False, separators=(",", ":"))
+        q_sentinel = json.dumps({"is_missing": True, "missing_reason": "sentinel"}, ensure_ascii=False, separators=(",", ":"))
+        q_dummy = json.dumps({"is_missing": True, "missing_reason": "dummy"}, ensure_ascii=False, separators=(",", ":"))
+        quality_flags = np.where(~is_missing, q_ok, np.where(missing_reason == "dummy", q_dummy, q_sentinel))
+        long_df["quality_flags"] = quality_flags
 
     meta = {
         "path": str(path),

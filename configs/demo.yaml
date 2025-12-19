@@ -3,26 +3,35 @@ outputs_dir: outputs
 
 inputs:
   geomag_dir: "地磁"
+  aef_dir: "大气电磁信号/大气电场"
   seismic_dir: "地震波"
-  aef_min_dir: "大气电磁信号/大气电场/kak202001-202010daef.min"
   vlf_dir: "大气电磁信号/电磁波动vlf"
   stationxml_path: "地震波/stations_inventory.xml"
 
-pipeline:
-  align_interval: "1min"
-  geomag_use: "min"   # min|sec（Demo 默认 min）
-  kalman:
-    enabled: true
-    q_scale: 1.0e-5
-    r_scale: 1.0e-2
-  anomaly:
-    z_threshold: 3.0
+storage:
+  format: parquet
+  compression: zstd
+  partition_cols: ["source", "station_id", "date"]
+
+preprocess:
+  geomag:
+    method: kalman
+    params: {Q: 1.0e-5, R: 1.0e-2}
+
+link:
+  N_hours: 72
+  M_hours: 24
+  K_km: 100
+  align_interval: 1min
+  z_threshold: 3.0
+
+api:
+  default_limit: 20000
+  plot_max_points: 5000
+  downsample_method: uniform
 
 events:
   - event_id: "0001"
     time_utc: "2020-09-12T02:44:11Z"
     lat: 38.748
     lon: 142.245
-    window_before_hours: 96
-    window_after_hours: 48
-    radius_km: 1000

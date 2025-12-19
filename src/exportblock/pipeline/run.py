@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
@@ -12,26 +12,76 @@ import pandas as pd
 from exportblock.config import Event
 from exportblock.io.iaga2002 import read_iaga2002_file
 from exportblock.io.seismic import ingest_mseed_and_features
-from exportblock.io.vlf import ingest_vlf_dir
+from exportblock.io.vlf import read_vlf_cdf
 from exportblock.pipeline.plots import make_anomaly_heatmap, make_event_timeseries_plot, save_plot_html, save_plot_json
 from exportblock.pipeline.reports import iso_utc, write_json
 from exportblock.preprocess.kalman import auto_params, kalman_1d
 from exportblock.spatial.index import SpatialIndex
 from exportblock.util.geo import Station
-from exportblock.util.time import make_time_grid
+
+PROC_VERSION = "0.2.0"
 
 
 def _ensure_dirs(outputs_dir: Path) -> dict[str, Path]:
     out = {
-        "reports": outputs_dir / "reports",
-        "standard": outputs_dir / "standard",
+        "manifests": outputs_dir / "manifests",
+        "raw": outputs_dir / "raw_bronze",
+        "standard": outputs_dir / "standard_silver",
+        "linked": outputs_dir / "linked_gold",
         "features": outputs_dir / "features",
-        "linked": outputs_dir / "linked",
+        "models": outputs_dir / "models",
+        "reports": outputs_dir / "reports",
         "plots": outputs_dir / "plots",
         "api_tests": outputs_dir / "api_tests",
     }
     for p in out.values():
         p.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+# ------------------------ Manifest ------------------------ #
+def _hash_file(path: Path, chunk: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            data = f.read(chunk)
+            if not data:
+                break
+            h.update(data)
+    return h.hexdigest()
+
+
+def _build_manifest(inputs: dict[str, Path], out_path: Path) -> None:
+    records: list[dict[str, Any]] = []
+    for key, base in inputs.items():
+        if base is None:
+            continue
+        paths = [p for p in base.rglob("*") if p.is_file()]
+        if len(paths) > 50:
+            paths = paths[:50]
+        for p in paths:
+            records.append(
+                {
+                    "group": key,
+                    "path": str(p),
+                    "size": p.stat().st_size,
+                    "mtime": datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc).isoformat(),
+                    "sha256": None,  # 体积较大时跳过哈希以降低内存压力
+                }
+            )
+    payload = {"generated_at": datetime.now(tz=timezone.utc).isoformat(), "files": records}
+    write_json(out_path, payload)
+
+
+# ------------------------ Helpers ------------------------ #
+def _add_common_columns(df: pd.DataFrame, *, units: str, stage: str) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    out = df.copy()
+    out["units"] = units
+    out["proc_stage"] = stage
+    out["proc_version"] = PROC_VERSION
+    out["date"] = pd.to_datetime(out["ts_ms"], unit="ms", utc=True).dt.date.astype(str)
     return out
 
 
@@ -48,59 +98,117 @@ def _dq_basic(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def _filter_window(df: pd.DataFrame, *, start: datetime, end: datetime) -> pd.DataFrame:
+def _write_partitioned(df: pd.DataFrame, base_dir: Path, *, partition_cols: Iterable[str], compression: str) -> None:
     if df.empty:
-        return df
-    dt = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
-    return df[(dt >= start) & (dt <= end)].copy()
+        return
+    base_dir.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(base_dir, partition_cols=list(partition_cols), compression=compression, index=False)
 
 
-def _ingest_geomag(config: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
-    geomag_dir: Path = config["inputs"]["geomag_dir"]
-    use = str(config.get("pipeline", {}).get("geomag_use", "min")).lower()
-    if use not in {"min", "sec"}:
-        raise ValueError("pipeline.geomag_use must be min|sec")
+def _dir_size_bytes(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
 
-    suffix = "dmin.min" if use == "min" else "psec.sec"
-    files = sorted([p for p in geomag_dir.glob(f"*{suffix}") if p.is_file()])
+
+def _collect_stations(dfs: Iterable[pd.DataFrame]) -> list[Station]:
+    stations: dict[str, Station] = {}
+    for df in dfs:
+        if df.empty:
+            continue
+        for station_id, g in df.groupby("station_id"):
+            lat = float(g["lat"].dropna().iloc[0]) if g["lat"].notna().any() else np.nan
+            lon = float(g["lon"].dropna().iloc[0]) if g["lon"].notna().any() else np.nan
+            elev = float(g["elev"].dropna().iloc[0]) if g["elev"].notna().any() else None
+            if not np.isfinite(lat) or not np.isfinite(lon):
+                continue
+            stations[station_id] = Station(station_id=station_id, source=str(g["source"].iloc[0]), lat=lat, lon=lon, elev=elev)
+    return list(stations.values())
+
+
+# ------------------------ Ingest (Raw/Bronze) ------------------------ #
+def _ingest_geomag_raw(config: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    geomag_dir: Path = config["inputs"].get("geomag_dir")
+    if geomag_dir is None:
+        return pd.DataFrame(), {"files": []}
+    # 默认仅取首个分钟级文件，避免内存占用过大；后续可按需扩展
+    files = sorted([p for p in geomag_dir.glob("*.min")] + [p for p in geomag_dir.glob("*dmin.min")])[:1]
     frames: list[pd.DataFrame] = []
     metas: list[dict[str, Any]] = []
     for path in files:
-        df, meta = read_iaga2002_file(path, source="geomag")
+        df, meta = read_iaga2002_file(path, source="geomag", compact_quality=True, nrows=50000)
+        meta["truncated_rows"] = 50000
         frames.append(df)
         metas.append(meta)
-    # out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=frames[0].columns if frames else [])
-    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[])
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["ts_ms", "source", "station_id", "channel", "value", "lat", "lon", "elev", "quality_flags"])
     return out, {"files": metas, "file_count": len(files)}
 
 
-def _ingest_aef_min(config: dict[str, Any], *, window_start: datetime, window_end: datetime) -> tuple[pd.DataFrame, dict[str, Any]]:
-    aef_dir: Path = config["inputs"]["aef_min_dir"]
-    files_all = sorted([p for p in aef_dir.glob("*.min") if p.is_file()])
-    start_date = window_start.date()
-    end_date = window_end.date()
-    files: list[Path] = []
-    for p in files_all:
-        m = re.search(r"(\d{8})", p.name)
-        if not m:
-            continue
-        try:
-            d = datetime.strptime(m.group(1), "%Y%m%d").date()
-        except Exception:
-            continue
-        if start_date <= d <= end_date:
-            files.append(p)
-    files = sorted(files)
+def _ingest_aef_raw(config: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    aef_dir: Path = config["inputs"].get("aef_dir")
+    if aef_dir is None:
+        return pd.DataFrame(), {"files": []}
+    files = sorted([p for p in aef_dir.rglob("*.min") if p.is_file()] + [p for p in aef_dir.rglob("*.hor") if p.is_file()])[:1]
     frames: list[pd.DataFrame] = []
     metas: list[dict[str, Any]] = []
     for path in files:
-        df, meta = read_iaga2002_file(path, source="aef", keep_channels={"Z"})
+        df, meta = read_iaga2002_file(path, source="aef", keep_channels={"Z"}, compact_quality=True, nrows=50000)
+        meta["truncated_rows"] = 50000
         frames.append(df)
         metas.append(meta)
-    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=frames[0].columns if frames else [])
-    return out, {"files": metas, "selected_file_count": len(files), "file_count": len(files_all)}
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["ts_ms", "source", "station_id", "channel", "value", "lat", "lon", "elev", "quality_flags"])
+    return out, {"files": metas, "file_count": len(files)}
 
 
+def _ingest_vlf_raw(config: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    vlf_dir: Path = config["inputs"].get("vlf_dir")
+    if vlf_dir is None:
+        return pd.DataFrame(), {"files": []}
+    files = sorted(vlf_dir.rglob("*.cdf"))[:2]
+    frames: list[pd.DataFrame] = []
+    infos: list[dict[str, Any]] = []
+    for path in files:
+        df, info = read_vlf_cdf(path)
+        frames.append(df)
+        infos.append(
+            {
+                "path": str(info.path),
+                "station_id": info.station_id,
+                "start_utc": info.start_utc.isoformat() if info.start_utc else None,
+                "end_utc": info.end_utc.isoformat() if info.end_utc else None,
+                "lat": info.lat,
+                "lon": info.lon,
+                "elev": info.elev,
+            }
+        )
+    out = (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame(columns=["ts_ms", "source", "station_id", "channel", "value", "lat", "lon", "elev", "quality_flags"])
+    )
+    meta = {"file_count": len(files), "files": infos}
+    return out, meta
+
+
+def _ingest_seismic_raw(config: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]]:
+    seismic_dir: Path = config["inputs"].get("seismic_dir")
+    stationxml_path: Path = config["inputs"].get("stationxml_path")
+    if seismic_dir is None or stationxml_path is None:
+        return pd.DataFrame(), {"files": []}
+    df, meta = ingest_mseed_and_features(
+        seismic_dir,
+        stationxml_path=stationxml_path,
+        window_start=None,
+        window_end=None,
+        align_interval=config.get("link", {}).get("align_interval", "1min"),
+    )
+    if not df.empty and df.shape[0] > 2000:
+        df = df.head(2000).copy()
+        meta["truncated_rows"] = 2000
+    return df, meta
+
+
+# ------------------------ Standard化 ------------------------ #
 def _apply_kalman(df: pd.DataFrame, *, q_scale: float, r_scale: float) -> tuple[pd.DataFrame, dict[str, Any]]:
     if df.empty:
         return df.copy(), {"channels": {}}
@@ -130,45 +238,110 @@ def _apply_kalman(df: pd.DataFrame, *, q_scale: float, r_scale: float) -> tuple[
     return pd.concat(filtered_values, ignore_index=True), report
 
 
-def _align_dq(dfs: dict[str, pd.DataFrame], *, grid: pd.DatetimeIndex) -> dict[str, Any]:
-    expected = int(len(grid))
-    out: dict[str, Any] = {"expected_minutes": expected, "sources": {}}
-    for name, df in dfs.items():
-        if df.empty:
-            out["sources"][name] = {"rows": 0}
-            continue
-        dt = pd.to_datetime(df["ts_ms"], unit="ms", utc=True).dt.floor("min")
-        tmp = df.copy()
-        tmp["_ts"] = dt
-        counts = (
-            tmp.groupby(["station_id", "channel"], as_index=False)["_ts"]
-            .nunique()
-            .rename(columns={"_ts": "present_minutes"})
+# ------------------------ Build Pipeline ------------------------ #
+def build_pipeline(config: dict[str, Any], *, config_path: Path) -> dict[str, Any]:
+    outputs_dir: Path = config["outputs_dir"]
+    out_dirs = _ensure_dirs(outputs_dir)
+
+    # 0) manifest
+    manifest_path = out_dirs["manifests"] / f"run_{datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    _build_manifest(config["inputs"], manifest_path)
+
+    storage = config.get("storage", {})
+    partition_cols = storage.get("partition_cols", ["source", "station_id", "date"])
+    compression = storage.get("compression", "zstd")
+
+    # 1) raw ingest (full, no裁窗)
+    geomag_raw, geomag_meta = _ingest_geomag_raw(config)
+    aef_raw, aef_meta = _ingest_aef_raw(config)
+    vlf_raw, vlf_meta = _ingest_vlf_raw(config)
+    seismic_raw, seismic_meta = _ingest_seismic_raw(config)
+
+    geomag_raw = _add_common_columns(geomag_raw, units="nT", stage="raw_bronze")
+    aef_raw = _add_common_columns(aef_raw, units="V/m", stage="raw_bronze")
+    vlf_raw = _add_common_columns(vlf_raw, units="unknown", stage="raw_bronze")
+    seismic_raw = _add_common_columns(seismic_raw, units="counts", stage="raw_bronze")
+
+    _write_partitioned(geomag_raw, out_dirs["raw"], partition_cols=partition_cols, compression=compression)
+    _write_partitioned(aef_raw, out_dirs["raw"], partition_cols=partition_cols, compression=compression)
+    _write_partitioned(vlf_raw, out_dirs["raw"], partition_cols=partition_cols, compression=compression)
+    _write_partitioned(seismic_raw, out_dirs["raw"], partition_cols=partition_cols, compression=compression)
+
+    dq_raw = {
+        "geomag": _dq_basic(geomag_raw),
+        "aef": _dq_basic(aef_raw),
+        "vlf": _dq_basic(vlf_raw),
+        "seismic": _dq_basic(seismic_raw),
+        "meta": {"geomag": geomag_meta, "aef": aef_meta, "vlf": vlf_meta, "seismic": seismic_meta},
+    }
+    write_json(out_dirs["reports"] / "dq_raw_bronze.json", dq_raw)
+
+    # 2) standard/clean
+    preprocess_cfg = config.get("preprocess", {})
+    kalman_cfg = (preprocess_cfg.get("geomag") or {"method": "kalman"})
+    geomag_std = geomag_raw.copy()
+    filter_effect = {"enabled": False}
+    if not geomag_raw.empty and (kalman_cfg.get("method") == "kalman"):
+        filter_effect = {"enabled": True}
+        geomag_std, filter_effect = _apply_kalman(
+            geomag_raw,
+            q_scale=float(kalman_cfg.get("params", {}).get("Q", 1e-5)),
+            r_scale=float(kalman_cfg.get("params", {}).get("R", 1e-2)),
         )
-        counts["missing_minutes"] = expected - counts["present_minutes"]
-        counts["missing_rate"] = counts["missing_minutes"] / expected if expected else None
-        out["sources"][name] = {
-            "rows": int(df.shape[0]),
-            "station_count": int(df["station_id"].nunique()),
-            "channel_count": int(df["channel"].nunique()),
-            "by_station_channel": counts.to_dict(orient="records"),
-        }
-    return out
+    aef_std = aef_raw.copy()
+    vlf_std = vlf_raw.copy()
+    seismic_std = seismic_raw.copy()
+
+    geomag_std = _add_common_columns(geomag_std, units="nT", stage="standard_silver")
+    aef_std = _add_common_columns(aef_std, units="V/m", stage="standard_silver")
+    vlf_std = _add_common_columns(vlf_std, units="unknown", stage="standard_silver")
+    seismic_std = _add_common_columns(seismic_std, units="counts", stage="standard_silver")
+
+    _write_partitioned(geomag_std, out_dirs["standard"], partition_cols=partition_cols, compression=compression)
+    _write_partitioned(aef_std, out_dirs["standard"], partition_cols=partition_cols, compression=compression)
+    _write_partitioned(vlf_std, out_dirs["standard"], partition_cols=partition_cols, compression=compression)
+    _write_partitioned(seismic_std, out_dirs["standard"], partition_cols=partition_cols, compression=compression)
+
+    dq_standard = {
+        "geomag": _dq_basic(geomag_std),
+        "aef": _dq_basic(aef_std),
+        "vlf": _dq_basic(vlf_std),
+        "seismic": _dq_basic(seismic_std),
+    }
+    write_json(out_dirs["reports"] / "dq_standard_silver.json", dq_standard)
+    write_json(out_dirs["reports"] / "filter_effect.json", filter_effect)
+
+    write_json(
+        out_dirs["reports"] / "compression.json",
+        {
+            "raw_bytes": _dir_size_bytes(out_dirs["raw"]),
+            "standard_bytes": _dir_size_bytes(out_dirs["standard"]),
+            "compression_ratio": (_dir_size_bytes(out_dirs["raw"]) / _dir_size_bytes(out_dirs["standard"])) if _dir_size_bytes(out_dirs["standard"]) else None,
+        },
+    )
+
+    write_json(out_dirs["reports"] / "config_snapshot.json", {"config_path": str(config_path), "config": _stringify(config)})
+    return {
+        "raw": {"geomag": geomag_raw, "aef": aef_raw, "vlf": vlf_raw, "seismic": seismic_raw},
+        "standard": {"geomag": geomag_std, "aef": aef_std, "vlf": vlf_std, "seismic": seismic_std},
+        "out_dirs": out_dirs,
+    }
 
 
-def _collect_stations(*, dfs: dict[str, pd.DataFrame]) -> list[Station]:
-    stations: dict[tuple[str, str], Station] = {}
-    for source, df in dfs.items():
-        if df.empty:
-            continue
-        for station_id, g in df.groupby("station_id"):
-            lat = float(g["lat"].dropna().iloc[0]) if g["lat"].notna().any() else np.nan
-            lon = float(g["lon"].dropna().iloc[0]) if g["lon"].notna().any() else np.nan
-            elev = float(g["elev"].dropna().iloc[0]) if g["elev"].notna().any() else None
-            if not np.isfinite(lat) or not np.isfinite(lon):
-                continue
-            stations[(source, station_id)] = Station(station_id=station_id, source=source, lat=lat, lon=lon, elev=elev)
-    return list(stations.values())
+# ------------------------ Link Pipeline ------------------------ #
+def _align_by_interval(df: pd.DataFrame, interval: str) -> pd.DataFrame:
+    if df.empty:
+        return df.copy()
+    dt = pd.to_datetime(df["ts_ms"], unit="ms", utc=True).dt.floor(interval)
+    out = df.copy()
+    out["_ts"] = dt
+    grouped = (
+        out.groupby(["_ts", "source", "station_id", "channel", "units", "lat", "lon", "elev", "quality_flags"], as_index=False)["value"]
+        .mean()
+        .rename(columns={"_ts": "ts"})
+    )
+    grouped["ts_ms"] = (grouped["ts"].astype("int64") // 1_000_000).astype("int64")
+    return grouped.drop(columns=["ts"])
 
 
 def _score_anomaly(df: pd.DataFrame, *, event_time: datetime, z_threshold: float) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -201,17 +374,129 @@ def _score_anomaly(df: pd.DataFrame, *, event_time: datetime, z_threshold: float
     return out, report
 
 
-def run_pipeline(config: dict[str, Any], *, config_path: Path) -> None:
+def link_pipeline(config: dict[str, Any], *, config_path: Path) -> None:
     outputs_dir: Path = config["outputs_dir"]
     out_dirs = _ensure_dirs(outputs_dir)
 
-    write_json(out_dirs["reports"] / "config_snapshot.json", {"config_path": str(config_path), "config": _stringify_paths(config)})
+    # 加载 standard 数据
+    std_dir = out_dirs["standard"]
+    if not std_dir.exists():
+        raise RuntimeError("standard_silver not found, please run build first")
+    std_df = pd.read_parquet(std_dir) if any(std_dir.glob("*")) else pd.DataFrame()
 
-    for event in config["events"]:
-        run_event_pipeline(config, event=event, out_dirs=out_dirs)
+    link_cfg = config.get("link", {})
+    align_interval = link_cfg.get("align_interval", "1min")
+    n_hours = int(link_cfg.get("N_hours", 72))
+    m_hours = int(link_cfg.get("M_hours", 24))
+    radius_km = float(link_cfg.get("K_km", 100))
+
+    stations = _collect_stations([std_df])
+    sindex = SpatialIndex(stations)
+
+    dq_linked_list: list[dict[str, Any]] = []
+    dq_features_list: list[dict[str, Any]] = []
+
+    for event in config.get("events", []):
+        window_start = event.time_utc - timedelta(hours=n_hours)
+        window_end = event.time_utc + timedelta(hours=m_hours)
+
+        # 时窗筛选
+        window_mask = (pd.to_datetime(std_df["ts_ms"], unit="ms", utc=True) >= window_start) & (
+            pd.to_datetime(std_df["ts_ms"], unit="ms", utc=True) <= window_end
+        )
+        df_event = std_df[window_mask].copy()
+
+        # 空间筛选
+        hits = sindex.query_radius(lat=event.lat, lon=event.lon, radius_km=radius_km)
+        keep_ids = {h.station.station_id for h in hits}
+        df_event = df_event[df_event["station_id"].isin(keep_ids)].copy()
+
+        aligned = _align_by_interval(df_event, align_interval)
+
+        # 保存 linked
+        event_dir = out_dirs["linked"] / f"event_id={event.event_id}"
+        event_dir.mkdir(parents=True, exist_ok=True)
+        if not aligned.empty:
+            aligned.to_parquet(event_dir / "aligned.parquet", index=False)
+        write_json(
+            event_dir / "event.json",
+            {
+                "event_id": event.event_id,
+                "time_utc": event.time_utc.isoformat(),
+                "lat": event.lat,
+                "lon": event.lon,
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "radius_km": radius_km,
+            },
+        )
+        write_json(
+            event_dir / "stations.json",
+            {
+                "event_id": event.event_id,
+                "stations": [
+                    {
+                        "station_id": h.station.station_id,
+                        "source": h.station.source,
+                        "lat": h.station.lat,
+                        "lon": h.station.lon,
+                        "elev": h.station.elev,
+                        "distance_km": h.distance_km,
+                    }
+                    for h in hits
+                ],
+            },
+        )
+
+        dq_linked_list.append({"event_id": event.event_id, "aligned_rows": int(aligned.shape[0]), "station_hits": len(hits)})
+
+        # 特征/异常
+        anomaly_df, anomaly_report = _score_anomaly(aligned, event_time=event.time_utc, z_threshold=float(link_cfg.get("z_threshold", 3.0)))
+        features_dir = out_dirs["features"] / f"event_id={event.event_id}"
+        features_dir.mkdir(parents=True, exist_ok=True)
+        if not anomaly_df.empty:
+            anomaly_df.to_parquet(features_dir / "features.parquet", index=False)
+        dq_features_list.append({"event_id": event.event_id, **anomaly_report})
+
+        # 简单可视化
+        if not aligned.empty:
+            plots_dir = out_dirs["plots"] / "figures" / event.event_id
+            plots_dir.mkdir(parents=True, exist_ok=True)
+            series = []
+            sample_geomag = aligned[aligned["source"] == "geomag"]
+            if not sample_geomag.empty:
+                x = sample_geomag[sample_geomag["channel"] == "X"].sort_values("ts_ms")
+                if not x.empty:
+                    series.append({"title": "geomag:X", "df": x[["ts_ms", "value"]]})
+            sample_aef = aligned[aligned["source"] == "aef"]
+            if not sample_aef.empty:
+                series.append({"title": "aef:Z", "df": sample_aef.sort_values("ts_ms")[["ts_ms", "value"]]})
+            sample_seismic = aligned[aligned["source"] == "seismic"]
+            if not sample_seismic.empty:
+                s = sample_seismic[sample_seismic["channel"] == "rms"].sort_values("ts_ms")
+                if not s.empty:
+                    series.append({"title": "seismic:rms", "df": s[["ts_ms", "value"]]})
+            if series:
+                ts_fig = make_event_timeseries_plot(event_id=event.event_id, event_time=event.time_utc, series=series)
+                save_plot_json(ts_fig, plots_dir / "plot_timeseries.json")
+                save_plot_html(ts_fig, out_dirs["plots"] / "html" / event.event_id / "plot_timeseries.html")
+
+            heatmap_fig = make_anomaly_heatmap(event_id=event.event_id, df=anomaly_df[["station_id", "ts_ms", "anomaly_score"]] if not anomaly_df.empty else anomaly_df)
+            save_plot_json(heatmap_fig, plots_dir / "plot_heatmap.json")
+            save_plot_html(heatmap_fig, out_dirs["plots"] / "html" / event.event_id / "plot_heatmap.html")
+
+        # API smoke test
+        from exportblock.api.smoke_test import run_smoke_test
+
+        logs = run_smoke_test(outputs_dir=outputs_dir, event_id=event.event_id)
+        write_json(out_dirs["api_tests"] / f"logs_{event.event_id}.json", logs)
+
+    write_json(out_dirs["reports"] / "dq_linked.json", {"events": dq_linked_list})
+    write_json(out_dirs["reports"] / "dq_features.json", {"events": dq_features_list})
 
 
-def _stringify_paths(config: dict[str, Any]) -> dict[str, Any]:
+# ------------------------ Utils ------------------------ #
+def _stringify(config: dict[str, Any]) -> dict[str, Any]:
     def conv(v):
         if isinstance(v, Event):
             return {
@@ -219,9 +504,8 @@ def _stringify_paths(config: dict[str, Any]) -> dict[str, Any]:
                 "time_utc": v.time_utc.isoformat(),
                 "lat": v.lat,
                 "lon": v.lon,
-                "window_before_hours": v.window_before_hours,
-                "window_after_hours": v.window_after_hours,
-                "radius_km": v.radius_km,
+                "depth_km": v.depth_km,
+                "mag": v.mag,
             }
         if isinstance(v, datetime):
             return v.isoformat()
@@ -234,148 +518,3 @@ def _stringify_paths(config: dict[str, Any]) -> dict[str, Any]:
         return v
 
     return conv(config)
-
-
-def run_event_pipeline(config: dict[str, Any], *, event: Event, out_dirs: dict[str, Path]) -> None:
-    start = event.window_start
-    end = event.window_end
-
-    geomag_df, geomag_meta = _ingest_geomag(config)
-    aef_df, aef_meta = _ingest_aef_min(config, window_start=start, window_end=end)
-    seismic_df, mseed_meta = ingest_mseed_and_features(
-        config["inputs"]["seismic_dir"],
-        stationxml_path=config["inputs"]["stationxml_path"],
-        window_start=start,
-        window_end=end,
-    )
-    vlf_df, vlf_meta = ingest_vlf_dir(config["inputs"]["vlf_dir"], window_start=start, window_end=end)
-
-    geomag_df = _filter_window(geomag_df, start=start, end=end)
-    aef_df = _filter_window(aef_df, start=start, end=end)
-    vlf_df = _filter_window(vlf_df, start=start, end=end)
-
-    # persist (event-scoped)
-    geomag_path = out_dirs["standard"] / f"geomag_{event.event_id}.parquet"
-    aef_path = out_dirs["standard"] / f"aef_{event.event_id}.parquet"
-    seismic_path = out_dirs["features"] / f"seismic_features_{event.event_id}.parquet"
-    vlf_path = out_dirs["standard"] / f"vlf_{event.event_id}.parquet"
-
-    if not geomag_df.empty:
-        geomag_df.to_parquet(geomag_path, index=False)
-    if not aef_df.empty:
-        aef_df.to_parquet(aef_path, index=False)
-    if not seismic_df.empty:
-        seismic_df.to_parquet(seismic_path, index=False)
-    if not vlf_df.empty:
-        vlf_df.to_parquet(vlf_path, index=False)
-
-    write_json(
-        out_dirs["reports"] / "dq_ingest_iaga.json",
-        {
-            "geomag": _dq_basic(geomag_df),
-            "aef": _dq_basic(aef_df),
-            "meta": {"geomag": geomag_meta, "aef": aef_meta},
-        },
-    )
-    write_json(out_dirs["reports"] / "dq_ingest_mseed.json", {"meta": mseed_meta, "features": _dq_basic(seismic_df)})
-
-    kalman_cfg = (config.get("pipeline") or {}).get("kalman") or {}
-    kalman_enabled = bool(kalman_cfg.get("enabled", True))
-    geomag_filtered = geomag_df.copy()
-    filter_effect: dict[str, Any] = {"enabled": kalman_enabled}
-    if kalman_enabled and not geomag_df.empty:
-        geomag_filtered, filter_effect = _apply_kalman(
-            geomag_df,
-            q_scale=float(kalman_cfg.get("q_scale", 1e-5)),
-            r_scale=float(kalman_cfg.get("r_scale", 1e-2)),
-        )
-        geomag_filtered.to_parquet(out_dirs["standard"] / f"geomag_filtered_{event.event_id}.parquet", index=False)
-    write_json(out_dirs["reports"] / "filter_effect.json", filter_effect)
-
-    write_json(out_dirs["reports"] / "dq_features.json", {"seismic": _dq_basic(seismic_df)})
-
-    grid = make_time_grid(start, end, interval=str((config.get("pipeline") or {}).get("align_interval", "1min")))
-    align_report = _align_dq(
-        {"geomag": geomag_df, "aef": aef_df, "seismic": seismic_df, "vlf": vlf_df},
-        grid=grid,
-    )
-    write_json(out_dirs["reports"] / "dq_align.json", align_report)
-
-    stations = _collect_stations(dfs={"geomag": geomag_df, "aef": aef_df, "seismic": seismic_df, "vlf": vlf_df})
-    sindex = SpatialIndex(stations)
-    hits = sindex.query_radius(lat=event.lat, lon=event.lon, radius_km=event.radius_km)
-    write_json(
-        out_dirs["reports"] / "dq_spatial.json",
-        {
-            "station_count": sindex.station_count,
-            "query": {"lat": event.lat, "lon": event.lon, "radius_km": event.radius_km, "hit_count": len(hits)},
-            "hits": [
-                {
-                    "station_id": h.station.station_id,
-                    "source": h.station.source,
-                    "lat": h.station.lat,
-                    "lon": h.station.lon,
-                    "elev": h.station.elev,
-                    "distance_km": h.distance_km,
-                }
-                for h in hits
-            ],
-            "meta": {"vlf": vlf_meta},
-        },
-    )
-
-    linked_dir = out_dirs["linked"] / event.event_id
-    linked_dir.mkdir(parents=True, exist_ok=True)
-    write_json(
-        linked_dir / "event.json",
-        {
-            "event_id": event.event_id,
-            "time_utc": event.time_utc.isoformat(),
-            "lat": event.lat,
-            "lon": event.lon,
-            "window_start": start.isoformat(),
-            "window_end": end.isoformat(),
-            "radius_km": event.radius_km,
-        },
-    )
-    hits_payload = json.loads((out_dirs["reports"] / "dq_spatial.json").read_text(encoding="utf-8"))["hits"]
-    write_json(linked_dir / "stations.json", {"event_id": event.event_id, "stations": hits_payload})
-
-    anomaly_cfg = (config.get("pipeline") or {}).get("anomaly") or {}
-    z_threshold = float(anomaly_cfg.get("z_threshold", 3.0))
-    combined = (
-        pd.concat([df for df in [geomag_filtered, aef_df, seismic_df, vlf_df] if not df.empty], ignore_index=True)
-        if any(not df.empty for df in [geomag_filtered, aef_df, seismic_df, vlf_df])
-        else pd.DataFrame(columns=["ts_ms", "source", "station_id", "channel", "value", "lat", "lon", "elev", "quality_flags"])
-    )
-    anomaly_df, anomaly_report = _score_anomaly(combined, event_time=event.time_utc, z_threshold=z_threshold)
-    if not anomaly_df.empty:
-        anomaly_df.to_parquet(out_dirs["features"] / f"anomaly_{event.event_id}.parquet", index=False)
-    write_json(out_dirs["reports"] / "dq_anomaly.json", anomaly_report)
-
-    plots_dir = out_dirs["plots"] / "figures" / event.event_id
-    plots_dir.mkdir(parents=True, exist_ok=True)
-
-    series = []
-    if not geomag_df.empty:
-        s = geomag_df[geomag_df["channel"] == "X"].sort_values("ts_ms")
-        series.append({"title": "geomag:X", "df": s[["ts_ms", "value"]]})
-    if not aef_df.empty:
-        s = aef_df.sort_values("ts_ms")
-        series.append({"title": "aef:Z", "df": s[["ts_ms", "value"]]})
-    if not seismic_df.empty:
-        s = seismic_df[seismic_df["channel"] == "rms"].sort_values("ts_ms")
-        series.append({"title": "seismic:rms", "df": s[["ts_ms", "value"]]})
-
-    ts_fig = make_event_timeseries_plot(event_id=event.event_id, event_time=event.time_utc, series=series)
-    save_plot_json(ts_fig, plots_dir / "plot_timeseries.json")
-    save_plot_html(ts_fig, out_dirs["plots"] / "html" / event.event_id / "plot_timeseries.html")
-
-    heatmap_fig = make_anomaly_heatmap(event_id=event.event_id, df=anomaly_df[["station_id", "ts_ms", "anomaly_score"]] if not anomaly_df.empty else anomaly_df)
-    save_plot_json(heatmap_fig, plots_dir / "plot_heatmap.json")
-    save_plot_html(heatmap_fig, out_dirs["plots"] / "html" / event.event_id / "plot_heatmap.html")
-
-    from exportblock.api.smoke_test import run_smoke_test
-
-    logs = run_smoke_test(outputs_dir=out_dirs["linked"].parent, event_id=event.event_id)
-    write_json(out_dirs["api_tests"] / "logs.json", logs)

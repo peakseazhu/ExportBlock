@@ -22,14 +22,11 @@ def run_smoke_test(*, outputs_dir: Path, event_id: str) -> dict[str, Any]:
     req("/health")
     req("/events")
     req(f"/events/{event_id}")
-    req(f"/events/{event_id}/stations")
+    req(f"/events/{event_id}/linked")
+    req(f"/events/{event_id}/features")
     req(f"/events/{event_id}/plots/timeseries")
     req(f"/events/{event_id}/plots/heatmap")
-    req(f"/raw/geomag?event_id={event_id}")
-    req(f"/raw/aef?event_id={event_id}")
-    req(f"/features/{event_id}")
-    req("/reports/dq_ingest_iaga.json")
+    req("/reports/dq_raw_bronze.json")
 
-    ok = all(item["status_code"] == 200 for item in logs[:4])
+    ok = all(item["status_code"] == 200 for item in logs if item["path"].startswith("/health") or item["path"].startswith("/events"))
     return {"ok": ok, "event_id": event_id, "requests": logs}
-

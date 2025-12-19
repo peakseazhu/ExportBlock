@@ -107,7 +107,7 @@ def read_vlf_cdf(path: str | Path) -> tuple[pd.DataFrame, VlfFileInfo]:
     return df[["ts_ms", "source", "station_id", "channel", "value", "lat", "lon", "elev", "quality_flags"]], info
 
 
-def ingest_vlf_dir(vlf_dir: str | Path, *, window_start: datetime, window_end: datetime) -> tuple[pd.DataFrame, dict[str, Any]]:
+def ingest_vlf_dir(vlf_dir: str | Path, *, window_start: datetime | None = None, window_end: datetime | None = None) -> tuple[pd.DataFrame, dict[str, Any]]:
     vlf_dir = Path(vlf_dir)
     cdf_files = sorted(vlf_dir.rglob("*.cdf"))
 
@@ -115,14 +115,10 @@ def ingest_vlf_dir(vlf_dir: str | Path, *, window_start: datetime, window_end: d
     infos: list[dict[str, Any]] = []
 
     for path in cdf_files:
-        parsed = _parse_filename(path)
-        if parsed:
-            _, dt = parsed
-            if dt > window_end or dt < window_start.replace(minute=0, second=0, microsecond=0):
-                continue
         df, info = read_vlf_cdf(path)
-        dt = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
-        df = df[(dt >= window_start) & (dt <= window_end)].copy()
+        if window_start and window_end:
+            dt = pd.to_datetime(df["ts_ms"], unit="ms", utc=True)
+            df = df[(dt >= window_start) & (dt <= window_end)].copy()
         if not df.empty:
             frames.append(df)
         infos.append(

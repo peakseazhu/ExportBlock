@@ -11,19 +11,25 @@ python -m pip install -r requirements.txt
 python -m pip install -e .
 ```
 
-2) 运行端到端 Demo（会生成 `outputs/` 下的报告/产物）：
+2) 全量 ingest + 标准化（Raw → Standard）：
 
 ```powershell
-python -m exportblock.cli run --config configs/demo.yaml
+python -m exportblock.cli build --config configs/demo.yaml
 ```
 
-3) 运行 API（默认 `http://127.0.0.1:8000`）：
+3) 事件关联/特征/可视化：
+
+```powershell
+python -m exportblock.cli link --config configs/demo.yaml
+```
+
+4) 运行 API（默认 `http://127.0.0.1:8000`）：
 
 ```powershell
 python -m exportblock.cli api --config configs/demo.yaml
 ```
 
-4) 运行测试：
+5) 运行测试：
 
 ```powershell
 python -m pytest

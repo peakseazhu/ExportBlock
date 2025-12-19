@@ -14,23 +14,8 @@ class Event:
     time_utc: datetime
     lat: float
     lon: float
-    window_before_hours: int
-    window_after_hours: int
-    radius_km: float
-
-    @property
-    def window_start(self) -> datetime:
-        return self.time_utc - timedelta_hours(self.window_before_hours)
-
-    @property
-    def window_end(self) -> datetime:
-        return self.time_utc + timedelta_hours(self.window_after_hours)
-
-
-def timedelta_hours(hours: int):
-    from datetime import timedelta
-
-    return timedelta(hours=int(hours))
+    depth_km: float | None = None
+    mag: float | None = None
 
 
 def _parse_utc_datetime(value: str) -> datetime:
@@ -83,13 +68,32 @@ def resolve_config_paths(config: dict[str, Any], *, config_path: Path) -> dict[s
                 time_utc=_parse_utc_datetime(str(item["time_utc"])),
                 lat=float(item["lat"]),
                 lon=float(item["lon"]),
-                window_before_hours=int(item["window_before_hours"]),
-                window_after_hours=int(item["window_after_hours"]),
-                radius_km=float(item["radius_km"]),
+                depth_km=float(item["depth_km"]) if "depth_km" in item else None,
+                mag=float(item["mag"]) if "mag" in item else None,
             )
         )
 
-    pipeline = dict(config.get("pipeline") or {})
+    storage = {
+        "format": "parquet",
+        "compression": "zstd",
+        "partition_cols": ["source", "station_id", "date"],
+        **(config.get("storage") or {}),
+    }
+
+    preprocess = dict(config.get("preprocess") or {})
+    link = {
+        "N_hours": 72,
+        "M_hours": 24,
+        "K_km": 100,
+        "align_interval": "1min",
+        **(config.get("link") or {}),
+    }
+    api = {
+        "default_limit": 20000,
+        "plot_max_points": 5000,
+        "downsample_method": "uniform",
+        **(config.get("api") or {}),
+    }
 
     return {
         **config,
@@ -97,6 +101,8 @@ def resolve_config_paths(config: dict[str, Any], *, config_path: Path) -> dict[s
         "outputs_dir": outputs_dir,
         "inputs": resolved_inputs,
         "events": events,
-        "pipeline": pipeline,
+        "storage": storage,
+        "preprocess": preprocess,
+        "link": link,
+        "api": api,
     }
-
