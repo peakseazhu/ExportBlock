@@ -25,4 +25,4 @@ events:
     lon: 142.245
     window_before_hours: 96
     window_after_hours: 48
-    radius_km: 200
+    radius_km: 1000

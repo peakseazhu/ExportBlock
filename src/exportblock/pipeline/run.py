@@ -69,7 +69,8 @@ def _ingest_geomag(config: dict[str, Any]) -> tuple[pd.DataFrame, dict[str, Any]
         df, meta = read_iaga2002_file(path, source="geomag")
         frames.append(df)
         metas.append(meta)
-    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=frames[0].columns if frames else [])
+    # out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=frames[0].columns if frames else [])
+    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[])
     return out, {"files": metas, "file_count": len(files)}
 
 
@@ -80,7 +81,7 @@ def _ingest_aef_min(config: dict[str, Any], *, window_start: datetime, window_en
     end_date = window_end.date()
     files: list[Path] = []
     for p in files_all:
-        m = re.search(r"(\\d{8})", p.name)
+        m = re.search(r"(\d{8})", p.name)
         if not m:
             continue
         try:
